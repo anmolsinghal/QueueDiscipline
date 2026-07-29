@@ -32,11 +32,11 @@ class lockfreequeue
     static constexpr std::size_t mask = size - 1; // for fast wraparound
 
     // --- Producer-owned Cache Line (only Producer thread writes here) ---
-    alignas(hardware_destructive_interference_size) cacheline_atomic write;
+    cacheline_atomic write;
     std::size_t read_cache{0};
 
     // --- Consumer-owned Cache Line (only Consumer thread writes here) ---
-    alignas(hardware_destructive_interference_size) cacheline_atomic read;
+    cacheline_atomic read;
     std::size_t write_cache{0};
 
     // --- Storage Line ---
