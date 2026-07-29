@@ -1,5 +1,6 @@
 # Executables & Binaries
 spsc
+benchmark
 *.o
 *.out
 *.exe
