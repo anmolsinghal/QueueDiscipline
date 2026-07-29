@@ -1,0 +1,7 @@
+# Executables & Binaries
+spsc
+*.o
+*.out
+*.exe
+*.dSYM/
+.DS_Store
