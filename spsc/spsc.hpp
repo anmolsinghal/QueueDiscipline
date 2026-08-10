@@ -1,5 +1,4 @@
-#ifndef SPSC_HPP
-#define SPSC_HPP
+#pragma once
 
 #include <atomic>
 #include <array>
@@ -24,7 +23,7 @@ concept PowerOfTwo = is_power_of_two(N);
 
 template<typename T, std::size_t size>
 requires PowerOfTwo<size>
-class lockfreequeue
+class SPSCQueue
 {   
     struct alignas(hardware_destructive_interference_size) cacheline_atomic {
         std::atomic<std::size_t> val{0};
@@ -43,7 +42,7 @@ class lockfreequeue
     alignas(hardware_destructive_interference_size) std::array<T, size> data;
 
 public:
-    lockfreequeue() : write{}, read{} {}
+    SPSCQueue() : write{}, read{} {}
 
     // Pass-by-reference pop
     [[nodiscard]] bool pop(T& val) noexcept(std::is_nothrow_move_assignable_v<T>)
@@ -78,5 +77,3 @@ public:
         return true;
     }
 };
-
-#endif // SPSC_HPP

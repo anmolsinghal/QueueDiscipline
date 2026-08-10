@@ -22,7 +22,7 @@ using Clock = std::chrono::high_resolution_clock;
 // 1. Throughput Benchmark
 template<typename T, std::size_t Capacity>
 void run_throughput_benchmark(const std::string& label, std::size_t num_items) {
-    lockfreequeue<T, Capacity> q;
+    SPSCQueue<T, Capacity> q;
 
     auto start = Clock::now();
 
@@ -56,8 +56,8 @@ void run_throughput_benchmark(const std::string& label, std::size_t num_items) {
 // 2. Ping-Pong Round-Trip Latency Benchmark (Collects Percentiles)
 template<std::size_t Capacity>
 void run_latency_benchmark(std::size_t num_samples) {
-    lockfreequeue<uint64_t, Capacity> q1; // Producer -> Consumer
-    lockfreequeue<uint64_t, Capacity> q2; // Consumer -> Producer
+    SPSCQueue<uint64_t, Capacity> q1; // Producer -> Consumer
+    SPSCQueue<uint64_t, Capacity> q2; // Consumer -> Producer
 
     std::vector<double> latencies_ns(num_samples);
     constexpr std::size_t WARMUP = 10000;
