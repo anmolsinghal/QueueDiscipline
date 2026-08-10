@@ -1,5 +1,6 @@
 # Executables & Binaries
-spsc
+/spsc/benchmark
+/spmc/benchmark
 benchmark
 *.o
 *.out

@@ -6,6 +6,9 @@
 #include <new>
 #include <type_traits>
 #include <memory>
+#if defined(__x86_64__) || defined(_M_X64)
+    #include <immintrin.h>
+#endif
 
 #ifdef __cpp_lib_hardware_interference_size
     using std::hardware_destructive_interference_size;
@@ -52,19 +55,21 @@ public:
     [[nodiscard]] bool pop(T& val) noexcept(std::is_nothrow_move_assignable_v<T>)
     {
         size_t r = read.val.load(std::memory_order_relaxed);
+
+        #if defined(__GNUC__) || defined(__clang__)
+            __builtin_prefetch(&data[(r + 1) & mask], 0, 1);
+        #endif
+
         Node& node = data[r & mask];
         std::size_t node_index = node.index.load(std::memory_order_acquire) - (r + 1);
 
-        if(node_index == 0 && read.val.compare_exchange_strong(r, r+1, std::memory_order_relaxed))
+        if (node_index == 0 && read.val.compare_exchange_strong(r, r + 1, std::memory_order_relaxed))
         {
             val = std::move(node.data);
             node.index.store(r + size, std::memory_order_release);
             return true;
         }
-        else
-        {   
-            return false;
-        }
+        return false;
     }
 
     template<typename U>
@@ -72,6 +77,11 @@ public:
     [[nodiscard]] bool push(U&& val)
     {
         std::size_t w = write;
+
+        #if defined(__GNUC__) || defined(__clang__)
+            __builtin_prefetch(&data[(w + 1) & mask], 1, 1);
+        #endif
+
         Node& node = data[w & mask];
         std::size_t node_index = node.index.load(std::memory_order_acquire) - w;
 

@@ -56,6 +56,10 @@ public:
                 return false;
         }
 
+        #if defined(__GNUC__) || defined(__clang__)
+            __builtin_prefetch(&data[(r + 1) & mask], 0, 1);
+        #endif
+
         val = std::move(data[r & mask]);
         read.val.store(r + 1, std::memory_order_release);
         return true;
@@ -71,6 +75,10 @@ public:
             if (w - read_cache == size)
                 return false;
         }
+
+        #if defined(__GNUC__) || defined(__clang__)
+            __builtin_prefetch(&data[(w + 1) & mask], 1, 1);
+        #endif
 
         data[w & mask] = val;
         write.val.store(w + 1, std::memory_order_release);
