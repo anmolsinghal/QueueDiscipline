@@ -30,21 +30,17 @@ class SPSCQueue
     };
     static constexpr std::size_t mask = size - 1; // for fast wraparound
 
-    // --- Producer-owned Cache Line (only Producer thread writes here) ---
     cacheline_atomic write;
     std::size_t read_cache{0};
 
-    // --- Consumer-owned Cache Line (only Consumer thread writes here) ---
     cacheline_atomic read;
     std::size_t write_cache{0};
 
-    // --- Storage Line ---
     alignas(hardware_destructive_interference_size) std::array<T, size> data;
 
 public:
     SPSCQueue() : write{}, read{} {}
 
-    // Pass-by-reference pop
     [[nodiscard]] bool pop(T& val) noexcept(std::is_nothrow_move_assignable_v<T>)
     {
         auto r = read.val.load(std::memory_order_relaxed);
