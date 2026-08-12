@@ -56,10 +56,6 @@ public:
     {
         size_t r = read.val.load(std::memory_order_relaxed);
 
-        #if defined(__GNUC__) || defined(__clang__)
-            __builtin_prefetch(&data[(r + 1) & mask], 0, 1);
-        #endif
-
         Node& node = data[r & mask];
         std::size_t node_index = node.index.load(std::memory_order_acquire) - (r + 1);
 
@@ -77,10 +73,6 @@ public:
     [[nodiscard]] bool push(U&& val)
     {
         std::size_t w = write;
-
-        #if defined(__GNUC__) || defined(__clang__)
-            __builtin_prefetch(&data[(w + 1) & mask], 1, 1);
-        #endif
 
         Node& node = data[w & mask];
         std::size_t node_index = node.index.load(std::memory_order_acquire) - w;
