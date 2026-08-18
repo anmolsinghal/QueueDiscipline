@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <iomanip>
 #include <iostream>
+#include <limits>
 #include <new>
 #include <numeric>
 #include <string>
@@ -28,6 +29,10 @@ namespace spmc_benchmark {
 
 namespace mpsc_benchmark {
 #include "mpsc/mpsc.hpp"
+}
+
+namespace mpmc_benchmark {
+#include "mpmc/mpmc.hpp"
 }
 
 using Clock = std::chrono::steady_clock;
@@ -173,6 +178,55 @@ double run_mpsc(std::size_t producers, std::size_t items_per_producer)
     return items / elapsed / 1e6;
 }
 
+template<typename Queue>
+double run_mpmc(std::size_t producers, std::size_t consumers, std::size_t items_per_producer)
+{
+    Queue queue;
+    const std::size_t items = producers * items_per_producer;
+    std::barrier ready{static_cast<std::ptrdiff_t>(producers + consumers + 1)};
+    std::barrier start{static_cast<std::ptrdiff_t>(producers + consumers + 1)};
+    std::atomic<std::size_t> popped{0};
+    std::vector<Value> sums(consumers);
+    std::vector<std::thread> threads;
+    threads.reserve(producers + consumers);
+
+    for (std::size_t id = 0; id < consumers; ++id) {
+        threads.emplace_back([&, id] {
+            Value value;
+            ready.arrive_and_wait();
+            start.arrive_and_wait();
+            while (popped.load(std::memory_order_relaxed) < items) {
+                if (queue.pop(value)) {
+                    sums[id] += value;
+                    popped.fetch_add(1, std::memory_order_relaxed);
+                }
+            }
+        });
+    }
+
+    for (std::size_t id = 0; id < producers; ++id) {
+        threads.emplace_back([&, id] {
+            const Value first = id * items_per_producer;
+            ready.arrive_and_wait();
+            start.arrive_and_wait();
+            for (Value value = first; value < first + items_per_producer; ++value)
+                while (!queue.push(value)) {}
+        });
+    }
+
+    ready.arrive_and_wait();
+    const auto begin = Clock::now();
+    start.arrive_and_wait();
+    for (auto& thread : threads)
+        thread.join();
+    const auto elapsed = std::chrono::duration<double>(Clock::now() - begin).count();
+
+    if (popped.load(std::memory_order_relaxed) != items ||
+        std::accumulate(sums.begin(), sums.end(), Value{0}) != sum_of_range(0, items))
+        std::terminate();
+    return items / elapsed / 1e6;
+}
+
 template<typename Run>
 Result measure(Run&& run, std::size_t trials)
 {
@@ -221,6 +275,15 @@ int main(int argc, char* argv[])
         const std::size_t per_producer = items / producers;
         print_result("MPSC (" + std::to_string(producers) + "P / 1C)", measure([&] {
             return run_mpsc<mpsc_benchmark::mpsc<Value>>(producers, per_producer);
+        }, trials));
+    }
+
+    for (std::size_t workers : {1u, 2u, 4u, 8u}) {
+        const std::size_t per_producer = items / workers;
+        print_result("MPMC (" + std::to_string(workers) + "P / " +
+                         std::to_string(workers) + "C)", measure([&] {
+            return run_mpmc<mpmc_benchmark::MPMC<Value, capacity>>(
+                workers, workers, per_producer);
         }, trials));
     }
 }
