@@ -24,52 +24,49 @@ concept PowerOfTwo = is_power_of_two(N);
 template<typename T, std::size_t size>
 requires PowerOfTwo<size>
 class SPSCQueue
-{   
-    struct alignas(hardware_destructive_interference_size) cacheline_atomic {
-        std::atomic<std::size_t> val{0};
-    };
+{
     static constexpr std::size_t mask = size - 1; // for fast wraparound
 
-    cacheline_atomic write;
+    alignas(hardware_destructive_interference_size) std::atomic<std::size_t> write{0};
     std::size_t read_cache{0};
 
-    cacheline_atomic read;
+    alignas(hardware_destructive_interference_size) std::atomic<std::size_t> read{0};
     std::size_t write_cache{0};
 
     alignas(hardware_destructive_interference_size) std::array<T, size> data;
 
 public:
-    SPSCQueue() : write{}, read{} {}
+    SPSCQueue() = default;
 
     [[nodiscard]] bool pop(T& val) noexcept(std::is_nothrow_move_assignable_v<T>)
     {
-        auto r = read.val.load(std::memory_order_relaxed);
+        auto r = read.load(std::memory_order_relaxed);
 
         if (r == write_cache)
         {
-            write_cache = write.val.load(std::memory_order_acquire);
+            write_cache = write.load(std::memory_order_acquire);
             if (r == write_cache)
                 return false;
         }
 
         val = std::move(data[r & mask]);
-        read.val.store(r + 1, std::memory_order_release);
+        read.store(r + 1, std::memory_order_release);
         return true;
     }
 
     [[nodiscard]] bool push(const T& val) noexcept(std::is_nothrow_copy_assignable_v<T>)
     {
-        auto w = write.val.load(std::memory_order_relaxed);
+        auto w = write.load(std::memory_order_relaxed);
 
         if (w - read_cache == size)
         {
-            read_cache = read.val.load(std::memory_order_acquire);
+            read_cache = read.load(std::memory_order_acquire);
             if (w - read_cache == size)
                 return false;
         }
 
         data[w & mask] = val;
-        write.val.store(w + 1, std::memory_order_release);
+        write.store(w + 1, std::memory_order_release);
         return true;
     }
 };

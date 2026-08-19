@@ -21,16 +21,16 @@ constexpr bool is_power_of_two(std::size_t n) {
 template<std::size_t N>
 concept PowerOfTwo = is_power_of_two(N);
 
+// Specialized bounded MPMC queue that atomically updates the payload and its
+// sequence number as one Entry. For a word-sized T, this requires a lock-free
+// double-width CAS. The slot CAS is both the ownership and publication point;
+// this is intentionally not a general-purpose queue for arbitrary payloads.
 template<typename T, std::size_t Size>
 requires PowerOfTwo<Size>
 && std::is_trivially_copyable_v<T> &&
 std::default_initializable<T>
 class MPMC
 {
-    struct alignas(hardware_destructive_interference_size) cacheline_atomic {
-        std::atomic<std::size_t> value{0};
-    };
-
     static constexpr std::size_t mask = Size - 1;
 
     struct Entry
@@ -43,16 +43,19 @@ class MPMC
         std::atomic<Entry> entry;
     };
 
-    static_assert(std::atomic<Entry>::is_always_lock_free);
+    static_assert(std::atomic<Entry>::is_always_lock_free,
+        "MPMC requires a lock-free atomic payload-and-sequence Entry");
+    static_assert(std::atomic<std::size_t>::is_always_lock_free,
+        "MPMC requires lock-free read and write cursors");
     static_assert(Size <= std::numeric_limits<std::size_t>::max() / 2);
 
-    cacheline_atomic write;
-    cacheline_atomic read;
+    alignas(hardware_destructive_interference_size) std::atomic<std::size_t> write;
+    alignas(hardware_destructive_interference_size) std::atomic<std::size_t> read;
 
     std::array<BufferSlot, Size> slots;
 
 public:
-    MPMC() : write{}, read{}
+    MPMC() : write{0}, read{0}
     {
         for (std::size_t i = 0; i < Size; ++i)
         {
@@ -65,7 +68,7 @@ public:
     {
         while(true)
         {
-            std::size_t idx = write.value.load(std::memory_order_relaxed);
+            std::size_t idx = write.load(std::memory_order_relaxed);
             auto& slot = slots[idx & mask];
             Entry old = slot.entry.load(std::memory_order_acquire);
             const std::size_t seq = old.sequence;
@@ -75,14 +78,14 @@ public:
                 Entry next{val, (idx << 1) | 1U};
                 if(slot.entry.compare_exchange_strong(old, next, std::memory_order_acq_rel))
                 {
-                    write.value.compare_exchange_strong(idx, idx + 1, std::memory_order_relaxed,
+                    write.compare_exchange_strong(idx, idx + 1, std::memory_order_relaxed,
                     std::memory_order_relaxed);
                     return true;
                 }
             }
             else if (seq == ((idx << 1) | 1U) || seq == ((idx + Size) << 1))
             {
-                write.value.compare_exchange_strong(idx, idx + 1, std::memory_order_relaxed,
+                write.compare_exchange_strong(idx, idx + 1, std::memory_order_relaxed,
                 std::memory_order_relaxed);
             }
             else if((seq + (Size << 1)) == ((idx << 1) | 1U))
@@ -98,7 +101,7 @@ public:
     {
         while(true)
         {
-            std::size_t idx = read.value.load(std::memory_order_relaxed);
+            std::size_t idx = read.load(std::memory_order_relaxed);
             auto& slot = slots[idx & mask];
             Entry old = slot.entry.load(std::memory_order_acquire);
             const std::size_t seq = old.sequence;
@@ -109,14 +112,14 @@ public:
                 if(slot.entry.compare_exchange_strong(old, next, std::memory_order_acq_rel))
                 {
                     out = old.data;
-                    read.value.compare_exchange_strong(idx, idx + 1, std::memory_order_relaxed,
+                    read.compare_exchange_strong(idx, idx + 1, std::memory_order_relaxed,
                     std::memory_order_relaxed);
                     return true;
                 }
             }
             else if ((seq | 1U) == (((idx + Size) << 1U) | 1U))
             {
-                read.value.compare_exchange_strong(idx, idx + 1, std::memory_order_relaxed,
+                read.compare_exchange_strong(idx, idx + 1, std::memory_order_relaxed,
                 std::memory_order_relaxed);
             }
             else if(seq == (idx << 1))

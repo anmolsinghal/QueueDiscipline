@@ -62,8 +62,8 @@ When demoing or building a production-grade SPSC queue, the following performanc
 * **Dynamic Alignment**: Using C++17 `std::hardware_destructive_interference_size` to ensure portability across 64-byte (x86) and 128-byte (Apple Silicon / ARM / AVX-512) cache line architectures.
 
 ### C. Caching Remote Indices (Reducing Cache Coherency Traffic)
-* Instead of loading `read.val` (owned by Consumer) on *every single* `push()` call, the Producer maintains a local non-atomic copy `read_cache`.
-* The Producer only re-reads `read.val` using an `acquire` atomic load when the queue appears full based on `read_cache`.
+* Instead of loading `read` (owned by Consumer) on *every single* `push()` call, the Producer maintains a local non-atomic copy `read_cache`.
+* The Producer only re-reads `read` using an `acquire` atomic load when the queue appears full based on `read_cache`.
 * This reduces interconnect bus traffic across CPU sockets/cores by orders of magnitude when the queue is not completely full.
 
 ### D. Memory Ordering Constraints

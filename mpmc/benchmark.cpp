@@ -28,21 +28,38 @@ void run_mpmc_benchmark(std::size_t producers, std::size_t consumers,
     MPMC<Value, Capacity> queue;
     const std::size_t items = producers * items_per_producer;
     std::barrier ready{static_cast<std::ptrdiff_t>(producers + consumers + 1)};
-    std::atomic<std::size_t> popped{0};
+    std::atomic<std::size_t> producers_done{0};
+    std::vector<std::size_t> counts(consumers);
     std::vector<Value> sums(consumers);
     std::vector<std::thread> threads;
     threads.reserve(producers + consumers);
 
     for (std::size_t id = 0; id < consumers; ++id) {
         threads.emplace_back([&, id] {
-            Value value;
+            std::size_t count = 0;
+            Value sum = 0;
+            Value value = 0;
             ready.arrive_and_wait();
-            while (popped.load(std::memory_order_relaxed) < items) {
+
+            while (true) {
                 if (queue.pop(value)) {
-                    sums[id] += value;
-                    popped.fetch_add(1, std::memory_order_relaxed);
+                    ++count;
+                    sum += value;
+                    continue;
+                }
+
+                if (producers_done.load(std::memory_order_acquire) == producers) {
+                    if (queue.pop(value)) {
+                        ++count;
+                        sum += value;
+                        continue;
+                    }
+                    break;
                 }
             }
+
+            counts[id] = count;
+            sums[id] = sum;
         });
     }
 
@@ -52,6 +69,7 @@ void run_mpmc_benchmark(std::size_t producers, std::size_t consumers,
             ready.arrive_and_wait();
             for (Value value = first; value < first + items_per_producer; ++value)
                 while (!queue.push(value)) {}
+            producers_done.fetch_add(1, std::memory_order_release);
         });
     }
 
@@ -61,17 +79,20 @@ void run_mpmc_benchmark(std::size_t producers, std::size_t consumers,
         thread.join();
     const auto elapsed = std::chrono::duration<double>(Clock::now() - begin).count();
 
+    const std::size_t count =
+        std::accumulate(counts.begin(), counts.end(), std::size_t{0});
     const Value sum = std::accumulate(sums.begin(), sums.end(), Value{0});
-    if (popped.load(std::memory_order_relaxed) != items || sum != sum_of_range(items))
+    if (count != items || sum != sum_of_range(items))
         std::terminate();
 
-    const double mops = items / elapsed / 1e6;
-    const double ns_per_item = elapsed / items * 1e9;
+    const double item_count = static_cast<double>(items);
+    const double mops = item_count / elapsed / 1e6;
+    const double ns_per_item = elapsed / item_count * 1e9;
     const std::string workers = std::to_string(producers) + "P / " +
                                 std::to_string(consumers) + "C";
     std::cout << std::left << std::setw(12) << workers
               << " | " << std::right << std::setw(10) << std::fixed
-              << std::setprecision(2) << mops << " M ops/s"
+              << std::setprecision(2) << mops << " M items/s"
               << " | " << std::setw(8) << ns_per_item << " ns/item\n";
 }
 
