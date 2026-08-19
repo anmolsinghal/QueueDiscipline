@@ -11,7 +11,7 @@ This is a focused guide for presenting the `SPMCQueue` implementation in this di
 * exactly one producer calling `push()`;
 * one or more consumers calling `pop()` concurrently;
 * no allocation after construction;
-* a single-attempt API: `push()` or `pop()` returns `false` instead of internally waiting or retrying.
+* non-blocking full/empty results: `push()` returns `false` when its next slot is unavailable, and `pop()` returns `false` when the current dequeue position is not published.
 
 The producer owns `write`, so enqueue does not need a CAS. Consumers share `read`, so dequeue must atomically decide which consumer owns the next item. That is the fundamental SPMC cost.
 
@@ -64,7 +64,7 @@ The relaxed CAS is deliberate: it is an ownership election, not the payload publ
 
 ## 4. Why More Consumers Reduce Throughput
 
-The single `read` counter is a hot shared cache location. With one consumer, every CAS succeeds without inter-consumer contention. With two or more consumers, each successful dequeue invalidates the cache copy held by the others, and losing consumers return `false` before retrying in their caller's loop.
+The single `read` counter is a hot shared cache location. With one consumer, every CAS succeeds without inter-consumer contention. With two or more consumers, each successful dequeue invalidates the cache copy held by the others. A consumer that loses the CAS reloads the new dequeue position and tries that slot instead of reporting a spurious empty result.
 
 This makes SPMC a good fit when work performed after dequeue is substantial or naturally parallel. It is a poor fit when consumers do almost no work and the queue itself becomes the shared bottleneck.
 
@@ -152,7 +152,7 @@ The key teaching point is experimental discipline: change one variable at a time
 
 ## 6. Terminology and Limits
 
-This code has bounded, single-attempt queue operations: neither `push()` nor `pop()` contains a retry loop. Calling code may still spin by repeatedly calling an operation after it returns `false`.
+`push()` is a bounded, single-attempt operation. `pop()` returns immediately when the current dequeue position is not published, but it can retry its ownership CAS while other consumers win positions. The queue therefore avoids spurious empty results caused solely by CAS contention, but an individual `pop()` is not wait-free under continuous consumer contention.
 
 Avoid an unconditional language-level “lock-free” claim. Whether `std::atomic<size_t>` is lock-free is target-dependent. On the intended desktop targets it is commonly lock-free, but the C++ type itself does not guarantee it. Likewise, a throwing move assignment in `pop()` occurs after the node has been claimed; for presentation and production use, prefer payload types with non-throwing move assignment.
 

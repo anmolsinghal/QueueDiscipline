@@ -27,10 +27,6 @@ template<typename T, std::size_t size>
 requires PowerOfTwo<size>
 class SPMCQueue
 {   
-    struct alignas(hardware_destructive_interference_size) cacheline_atomic {
-        std::atomic<std::size_t> val{0};
-    };
-
     static constexpr std::size_t mask = size - 1; // for fast wraparound
 
     struct alignas(hardware_destructive_interference_size) Node
@@ -39,13 +35,13 @@ class SPMCQueue
         std::atomic<size_t> index{0};
     };
 
-    size_t write;
-    cacheline_atomic read;
+    alignas(hardware_destructive_interference_size) std::size_t write;
+    alignas(hardware_destructive_interference_size) std::atomic<std::size_t> read;
 
     alignas(hardware_destructive_interference_size) std::array<Node, size> data;
 
 public:
-    SPMCQueue() : write{0}, read{} 
+    SPMCQueue() : write{0}, read{0}
     {
         for (size_t i = 0; i < size; ++i) {
             data[i].index.store(i, std::memory_order_relaxed);
@@ -54,18 +50,23 @@ public:
 
     [[nodiscard]] bool pop(T& val) noexcept(std::is_nothrow_move_assignable_v<T>)
     {
-        size_t r = read.val.load(std::memory_order_relaxed);
+        std::size_t r = read.load(std::memory_order_relaxed);
 
-        Node& node = data[r & mask];
-        std::size_t node_index = node.index.load(std::memory_order_acquire) - (r + 1);
-
-        if (node_index == 0 && read.val.compare_exchange_strong(r, r + 1, std::memory_order_relaxed))
+        while (true)
         {
-            val = std::move(node.data);
-            node.index.store(r + size, std::memory_order_release);
-            return true;
+            Node& node = data[r & mask];
+
+            if (node.index.load(std::memory_order_acquire) != r + 1)
+                return false;
+
+            if (read.compare_exchange_weak(r, r + 1,
+                    std::memory_order_relaxed, std::memory_order_relaxed))
+            {
+                val = std::move(node.data);
+                node.index.store(r + size, std::memory_order_release);
+                return true;
+            }
         }
-        return false;
     }
 
     template<typename U>
