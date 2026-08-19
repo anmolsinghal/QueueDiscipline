@@ -1,6 +1,8 @@
 #pragma once
 
 #include <atomic>
+#include <cstddef>
+#include <new>
 #include <utility>
 
 template<typename T>
@@ -12,7 +14,14 @@ struct mpsc
         std::atomic<Node*> next{nullptr};
     };
 
-    mpsc() : head(new Node()), tail{head} {}
+#ifdef __cpp_lib_hardware_interference_size
+    static constexpr std::size_t cacheline_size =
+        std::hardware_destructive_interference_size;
+#else
+    static constexpr std::size_t cacheline_size = 64;
+#endif
+
+    mpsc() : head{new Node()}, tail{head} {}
 
     mpsc(const mpsc&) = delete;
     mpsc& operator=(const mpsc&) = delete;
@@ -30,28 +39,31 @@ struct mpsc
         }
     }
 
-    bool pop(T& val)
+    void pop(T& val)
     {
-        Node* n = head->next.load(std::memory_order_acquire);
-        if(n == nullptr)
-            return false;
+        Node* n;
+        do
+        {
+            n = head->next.load(std::memory_order_acquire);
+        }
+        while (n == nullptr);
+
         val = std::move(n->data);
         Node* old_head = head;
         head = n;
         delete old_head;
-        return true;
     }
 
-    bool push(const T& val)
+    void push(const T& val)
     {
         Node* n = new Node{val, nullptr};
 
         Node* previous = tail.exchange(n, std::memory_order_acq_rel);
 
         previous->next.store(n, std::memory_order_release);
-        return true;
     }
-    Node* head;
-    std::atomic<Node*> tail;
+
+    alignas(cacheline_size) Node* head;
+    alignas(cacheline_size) std::atomic<Node*> tail;
 
 };

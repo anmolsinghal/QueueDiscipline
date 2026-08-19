@@ -160,7 +160,7 @@ double run_mpsc(std::size_t producers, std::size_t items_per_producer)
         ready.arrive_and_wait();
         start.arrive_and_wait();
         for (std::size_t i = 0; i < items; ++i) {
-            while (!queue.pop(value)) {}
+            queue.pop(value);
             sum += value;
         }
     });

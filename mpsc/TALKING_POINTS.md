@@ -33,6 +33,8 @@ The implementation has:
 
 `head` is consumer-owned. It always points at the current dummy node; the first real item is `head->next`. `tail` is the producer endpoint. The names are less important than the ownership: only the consumer advances `head`; all producers atomically replace `tail`.
 
+The consumer and producer endpoints occupy separate interference-size regions. The consumer's writes to `head` therefore do not cause false sharing with the producers' exchanges on `tail`.
+
 The queue is non-intrusive: `Node` stores `T` directly and the queue allocates/deletes it. The classic high-performance form is often intrusive, where the caller embeds a queue node in a larger object and controls allocation/reclamation externally.
 
 ---
@@ -67,9 +69,10 @@ The release store to `previous->next` publishes the initialized node and its pay
 ## 4. Consumer Protocol: Advance the Dummy
 
 ```cpp
-Node* next = head->next.load(std::memory_order_acquire);
-if (next == nullptr)
-    return false;
+Node* next;
+do {
+    next = head->next.load(std::memory_order_acquire);
+} while (next == nullptr);
 
 value = std::move(next->data);
 Node* old_head = head;
@@ -78,6 +81,8 @@ delete old_head;
 ```
 
 The acquire load that sees `next` synchronizes with the producer's release store, so `next->data` is ready to read.
+
+This `pop()` is a blocking spin operation: it does not report an empty result. It waits until the next node becomes reachable. The caller must therefore only use it when indefinite waiting for an item is acceptable.
 
 The consumer does not delete `next`. It promotes `next` into the new dummy node and deletes the *previous* dummy. This is safe because observing `old_head->next == next` proves that the producer has already finished the only link write it makes through `old_head`.
 
@@ -99,11 +104,12 @@ While P1 is paused, another producer can append B after A, but neither A nor B i
 
 Consequences to state precisely:
 
-* `pop()` returning `false` can mean either **truly empty** or **a producer is between exchange and link**.
-* If the paused producer never resumes, the consumer cannot reach that suffix. The queue as a whole is blocking in this failure mode.
-* The algorithm is serializable, not linearizable: it preserves FIFO order within each producer, but does not provide a single global linearization point for overlapping producers.
+* While the queue is truly empty, `pop()` spins until a producer links a node.
+* If a producer pauses in the gap, `pop()` also spins; it cannot distinguish that gap from a truly empty queue.
+* If the paused producer never resumes, the consumer cannot reach that suffix and `pop()` never returns.
+* Because `pop()` no longer reports a false empty result across the gap, completed pushes and pops can be linearized in the total order established by the producer exchanges. The price of restoring that stronger successful-operation history is blocking rather than returning an empty result.
 
-This is the defining tradeoff of the minimal Vyukov MPSC design. It is often acceptable when producer threads cannot be cancelled in the exchange-to-link window and a very small producer path matters more than strict global queue semantics.
+This is the defining tradeoff of this blocking Vyukov MPSC variant. It is often acceptable when producer threads cannot be cancelled in the exchange-to-link window and a very small producer path matters more than consumer progress.
 
 > Presentation line: “We traded a CAS loop for a two-step handoff. The tiny gap between those steps is the whole algorithm’s caveat.”
 
@@ -116,8 +122,8 @@ This is the defining tradeoff of the minimal Vyukov MPSC design. It is often acc
 | No fixed capacity or full-ring check | Heap allocation and eventual deallocation per item in this non-intrusive implementation |
 | One atomic exchange per producer protocol | A stalled producer can make a suffix unreachable |
 | No producer CAS retry loop | The complete `push()` is not wait-free when `new` is included |
-| Single consumer has simple dummy-node reclamation | Only one consumer may call `pop()` |
-| Per-producer FIFO | No global linearizable FIFO order among concurrent producers |
+| Single consumer has simple dummy-node reclamation | Only one consumer may call `pop()`, and `pop()` waits indefinitely when empty |
+| FIFO in the total producer-exchange order | No non-blocking empty result; an unfinished link blocks the consumer frontier |
 
 The local comparison benchmark intentionally makes these costs visible. With a tiny `uint64_t` payload and no useful work, the unbounded MPSC queue was roughly 10–20 M ops/s, much slower than the preallocated rings. That is expected: allocation, pointer chasing, allocator metadata, and cache/TLB misses dominate a scalar queue benchmark.
 
@@ -132,7 +138,7 @@ Use this queue when its unbounded, many-producer message-passing semantics solve
 * A throwing move assignment in `pop()` can interrupt item delivery after the node link has been observed; prefer non-throwing payload moves for a presentation-quality queue.
 * Destruction requires all producers and the consumer to have stopped first.
 * `new` can throw and can take locks internally. The queue protocol is simple, but this non-intrusive wrapper is not suitable for hard real-time code.
-* `pop()` has only a boolean result, so callers cannot distinguish a true empty queue from the exchange-to-link gap. A richer `empty/item/retry` API can expose that distinction.
+* `pop()` is a tight spin wait. A production blocking API may use a pause/backoff policy or an explicit notification mechanism to avoid consuming a core while the queue remains empty.
 
 ---
 
