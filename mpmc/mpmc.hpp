@@ -9,6 +9,8 @@
 #include <new>
 #include <type_traits>
 
+#include "atomic_entry.hpp"
+
 // Fixed-capacity multiple-producer/multiple-consumer queue.
 //
 // push() and pop() return false when the ring is full or empty. The capacity
@@ -18,8 +20,9 @@
 // sequence number as one Entry. For a word-sized T, this requires a lock-free
 // double-width CAS. The slot CAS is both the ownership and publication point;
 // compilation intentionally fails when the target cannot provide the required
-// always-lock-free atomics. Operations may retry under contention and are not
-// wait-free.
+// always-lock-free atomics. GCC and Clang x86-64 builds must enable CMPXCHG16B
+// support (for example, with -mcx16). Operations may retry under contention and
+// are not wait-free.
 template<typename T, std::size_t Size>
 requires (std::has_single_bit(Size) && std::is_trivially_copyable_v<T> &&
           std::default_initializable<T>)
@@ -40,12 +43,15 @@ class MPMC
         std::size_t sequence{0};
     };
 
+    using AtomicEntry = mpmc_detail::atomic_entry<Entry, T>;
+
     struct alignas(cacheline_size) BufferSlot {
-        std::atomic<Entry> entry;
+        AtomicEntry entry;
     };
 
-    static_assert(std::atomic<Entry>::is_always_lock_free,
-        "MPMC requires a lock-free atomic payload-and-sequence Entry");
+    static_assert(AtomicEntry::is_always_lock_free,
+        "MPMC requires a lock-free std::atomic<Entry> or native x86 CMPXCHG16B; "
+        "compile supported x86 targets with -mcx16");
     static_assert(std::atomic<std::size_t>::is_always_lock_free,
         "MPMC requires lock-free read and write cursors");
     static_assert(Size <= std::numeric_limits<std::size_t>::max() / 2);
