@@ -1,9 +1,0 @@
-# Executables & Binaries
-/spsc/benchmark
-/spmc/benchmark
-benchmark
-*.o
-*.out
-*.exe
-*.dSYM/
-.DS_Store

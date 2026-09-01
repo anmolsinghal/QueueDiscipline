@@ -1,49 +1,47 @@
-#include <atomic>
+#pragma once
+
 #include <array>
-#include <concepts>
+#include <atomic>
+#include <bit>
 #include <cstddef>
-#include <utility>
 #include <new>
 #include <type_traits>
-#include <memory>
-#if defined(__x86_64__) || defined(_M_X64)
-    #include <immintrin.h>
-#endif
+#include <utility>
 
-#ifdef __cpp_lib_hardware_interference_size
-    using std::hardware_destructive_interference_size;
-#else
-    static constexpr std::size_t hardware_destructive_interference_size = 64;
-#endif
-
-constexpr bool is_power_of_two(std::size_t n) {
-    return n && ((n & (n - 1)) == 0);
-};
-
-template<std::size_t N>
-concept PowerOfTwo = is_power_of_two(N);
-
+// Fixed-capacity single-producer/multiple-consumer queue.
+//
+// Exactly one thread may call push(); multiple threads may call pop(). Both
+// operations return false immediately when the ring is full or empty. The
+// capacity must be a power of two. T must be default-constructible and
+// move-assignable, and the value passed to push() must be assignable to T.
 template<typename T, std::size_t size>
-requires PowerOfTwo<size>
+requires (std::has_single_bit(size))
 class SPMCQueue
-{   
+{
+#ifdef __cpp_lib_hardware_interference_size
+    static constexpr std::size_t cacheline_size =
+        std::hardware_destructive_interference_size;
+#else
+    static constexpr std::size_t cacheline_size = 64;
+#endif
+
     static constexpr std::size_t mask = size - 1; // for fast wraparound
 
-    struct alignas(hardware_destructive_interference_size) Node
+    struct alignas(cacheline_size) Node
     {
         T data;
-        std::atomic<size_t> index{0};
+        std::atomic<std::size_t> index{0};
     };
 
-    alignas(hardware_destructive_interference_size) std::size_t write;
-    alignas(hardware_destructive_interference_size) std::atomic<std::size_t> read;
+    alignas(cacheline_size) std::size_t write;
+    alignas(cacheline_size) std::atomic<std::size_t> read;
 
-    alignas(hardware_destructive_interference_size) std::array<Node, size> data;
+    alignas(cacheline_size) std::array<Node, size> data;
 
 public:
     SPMCQueue() : write{0}, read{0}
     {
-        for (size_t i = 0; i < size; ++i) {
+        for (std::size_t i = 0; i < size; ++i) {
             data[i].index.store(i, std::memory_order_relaxed);
         }
     }

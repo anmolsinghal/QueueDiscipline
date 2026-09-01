@@ -2,35 +2,36 @@
 
 #include <atomic>
 #include <array>
-#include <concepts>
+#include <bit>
 #include <cstddef>
+#include <concepts>
 #include <limits>
 #include <new>
 #include <type_traits>
 
-#ifdef __cpp_lib_hardware_interference_size
-    using std::hardware_destructive_interference_size;
-#else
-    static constexpr std::size_t hardware_destructive_interference_size = 64;
-#endif
-
-constexpr bool is_power_of_two(std::size_t n) {
-    return n && ((n & (n - 1)) == 0);
-}
-
-template<std::size_t N>
-concept PowerOfTwo = is_power_of_two(N);
-
-// Specialized bounded MPMC queue that atomically updates the payload and its
+// Fixed-capacity multiple-producer/multiple-consumer queue.
+//
+// push() and pop() return false when the ring is full or empty. The capacity
+// must be a power of two. T must be trivially copyable and default-initializable.
+//
+// This specialized queue atomically updates the payload and its
 // sequence number as one Entry. For a word-sized T, this requires a lock-free
 // double-width CAS. The slot CAS is both the ownership and publication point;
-// this is intentionally not a general-purpose queue for arbitrary payloads.
+// compilation intentionally fails when the target cannot provide the required
+// always-lock-free atomics. Operations may retry under contention and are not
+// wait-free.
 template<typename T, std::size_t Size>
-requires PowerOfTwo<Size>
-&& std::is_trivially_copyable_v<T> &&
-std::default_initializable<T>
+requires (std::has_single_bit(Size) && std::is_trivially_copyable_v<T> &&
+          std::default_initializable<T>)
 class MPMC
 {
+#ifdef __cpp_lib_hardware_interference_size
+    static constexpr std::size_t cacheline_size =
+        std::hardware_destructive_interference_size;
+#else
+    static constexpr std::size_t cacheline_size = 64;
+#endif
+
     static constexpr std::size_t mask = Size - 1;
 
     struct Entry
@@ -39,7 +40,7 @@ class MPMC
         std::size_t sequence{0};
     };
 
-    struct alignas(hardware_destructive_interference_size) BufferSlot {
+    struct alignas(cacheline_size) BufferSlot {
         std::atomic<Entry> entry;
     };
 
@@ -49,8 +50,8 @@ class MPMC
         "MPMC requires lock-free read and write cursors");
     static_assert(Size <= std::numeric_limits<std::size_t>::max() / 2);
 
-    alignas(hardware_destructive_interference_size) std::atomic<std::size_t> write;
-    alignas(hardware_destructive_interference_size) std::atomic<std::size_t> read;
+    alignas(cacheline_size) std::atomic<std::size_t> write;
+    alignas(cacheline_size) std::atomic<std::size_t> read;
 
     std::array<BufferSlot, Size> slots;
 

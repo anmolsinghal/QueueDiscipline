@@ -1,39 +1,39 @@
 #pragma once
 
-#include <atomic>
 #include <array>
-#include <concepts>
+#include <atomic>
+#include <bit>
 #include <cstddef>
-#include <utility>
 #include <new>
 #include <type_traits>
+#include <utility>
 
-#ifdef __cpp_lib_hardware_interference_size
-    using std::hardware_destructive_interference_size;
-#else
-    static constexpr std::size_t hardware_destructive_interference_size = 64;
-#endif
-
-constexpr bool is_power_of_two(std::size_t n) {
-    return n && ((n & (n - 1)) == 0);
-}
-
-template<std::size_t N>
-concept PowerOfTwo = is_power_of_two(N);
-
+// Fixed-capacity single-producer/single-consumer queue.
+//
+// Exactly one thread may call push(), and exactly one other thread may call
+// pop(). Both operations return false immediately when the ring is full or
+// empty. The capacity must be a power of two. T must be default-constructible,
+// copy-assignable for push(), and move-assignable for pop().
 template<typename T, std::size_t size>
-requires PowerOfTwo<size>
+requires (std::has_single_bit(size))
 class SPSCQueue
 {
+#ifdef __cpp_lib_hardware_interference_size
+    static constexpr std::size_t cacheline_size =
+        std::hardware_destructive_interference_size;
+#else
+    static constexpr std::size_t cacheline_size = 64;
+#endif
+
     static constexpr std::size_t mask = size - 1; // for fast wraparound
 
-    alignas(hardware_destructive_interference_size) std::atomic<std::size_t> write{0};
+    alignas(cacheline_size) std::atomic<std::size_t> write{0};
     std::size_t read_cache{0};
 
-    alignas(hardware_destructive_interference_size) std::atomic<std::size_t> read{0};
+    alignas(cacheline_size) std::atomic<std::size_t> read{0};
     std::size_t write_cache{0};
 
-    alignas(hardware_destructive_interference_size) std::array<T, size> data;
+    alignas(cacheline_size) std::array<T, size> data;
 
 public:
     SPSCQueue() = default;

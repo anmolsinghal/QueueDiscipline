@@ -5,6 +5,13 @@
 #include <new>
 #include <utility>
 
+// Unbounded multiple-producer/single-consumer queue.
+//
+// Multiple threads may call push(); exactly one thread may call pop(). push()
+// allocates one node. pop() spins until an item is available and therefore does
+// not provide an empty result. All participating threads must stop before the
+// queue is destroyed. T must be default-constructible, copy-constructible, and
+// move-assignable.
 template<typename T>
 struct mpsc
 {
