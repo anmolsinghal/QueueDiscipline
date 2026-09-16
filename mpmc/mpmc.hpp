@@ -1,5 +1,12 @@
 #pragma once
 
+// The MPMC queue algorithm in this file is adapted from Erez Strauss's
+// lockfree_mpmc_queue implementation and his CppCon 2023 presentation:
+// https://github.com/erez-strauss/lockfree_mpmc_queue
+// https://youtu.be/M3v2GfeGJYs
+// Copyright (c) 2019 Erez Strauss. See ../THIRD_PARTY_NOTICES.md for the
+// upstream MIT license and details of this repository's modifications.
+
 #include <atomic>
 #include <array>
 #include <bit>

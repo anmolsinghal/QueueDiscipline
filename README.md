@@ -208,8 +208,28 @@ spmc/spmc.hpp          Single-producer/multiple-consumer bounded ring
 mpsc/mpsc.hpp          Multiple-producer/single-consumer linked queue
 mpmc/mpmc.hpp          Multiple-producer/multiple-consumer bounded ring
 mpmc/atomic_entry.hpp  MPMC atomic-entry portability adapter
+Cppcon presentation.pptx  Slide deck for this CppCon talk
+THIRD_PARTY_NOTICES.md    Third-party attribution and license terms
 ```
+
+## Acknowledgements
+
+The MPMC queue is adapted from Erez Strauss's
+[`lockfree_mpmc_queue`](https://github.com/erez-strauss/lockfree_mpmc_queue)
+implementation and the design he presented in
+[*Lockfree, Atomic, Multi Producer, Multi Consumer Queue* at CppCon
+2023](https://youtu.be/M3v2GfeGJYs). His
+[original slides](https://github.com/erez-strauss/lockfree_mpmc_queue/blob/master/CppCon2023_ES_Lockfree_MPMC_Queue_Oct3.pdf)
+are also available in the upstream repository.
+
+This repository's version narrows the interface to a fixed compile-time
+capacity, uses C++23 constraints, and adds an atomic-entry portability adapter.
+Erez Strauss retains copyright in the upstream implementation; its MIT license
+is reproduced in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
 ## License
 
-Licensed under the [Apache License 2.0](LICENSE).
+Except for the credited third-party material, this repository is licensed under
+the [Apache License 2.0](LICENSE). See
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for third-party attribution and
+license terms.
